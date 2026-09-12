@@ -1,0 +1,143 @@
+# ============================================================
+# CodeMart Fullstack — Frontend + Backend + PostgreSQL + Redis
+# ============================================================
+# One command runs everything:
+#   docker compose up -d --build
+#
+# Then open:
+#   http://localhost:3000  (frontend)
+#   http://localhost:4000/docs (Swagger API docs)
+# ============================================================
+name: codemart-fullstack
+
+services:
+  # ============================================================
+  # PostgreSQL 16 — primary datastore
+  # ============================================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: codemart-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-codemart}
+      POSTGRES_USER: ${DB_USER:-codemart}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-codemart_strong_password_change_me}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/deploy/postgres-init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-codemart} -d ${DB_NAME:-codemart}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - codemart-net
+
+  # ============================================================
+  # Redis 7 — cache, sessions, rate-limit, cart storage
+  # ============================================================
+  redis:
+    image: redis:7-alpine
+    container_name: codemart-redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD:-redis_strong_password_change_me}
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redis_strong_password_change_me}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - codemart-net
+
+  # ============================================================
+  # CodeMart Backend (NestJS API)
+  # ============================================================
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: codemart-backend
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      DB_HOST: postgres
+      REDIS_HOST: redis
+      APP_URL: http://localhost:4000
+      FRONTEND_URL: http://localhost:3000
+      CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
+    volumes:
+      - uploads_data:/app/uploads
+    ports:
+      - "4000:4000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - codemart-net
+    healthcheck:
+      # Use simple HEAD-style check that doesn't depend on response body parsing
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:4000/api/health/ping || exit 1"]
+      interval: 10s
+      timeout: 15s
+      retries: 15
+      start_period: 120s
+
+  # ============================================================
+  # CodeMart Frontend (Next.js 15)
+  # ============================================================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # Passed as build ARG → inlined into the Next.js bundle
+        NEXT_PUBLIC_API_URL: http://localhost:4000/api
+    container_name: codemart-frontend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      # Server-side API URL (for SSR fetches inside the container)
+      NEXT_PUBLIC_API_URL: http://localhost:4000/api
+      NEXT_PUBLIC_API_BASE: http://localhost:4000
+    ports:
+      - "3000:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - codemart-net
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  uploads_data:
+    driver: local
+
+networks:
+  codemart-net:
+    driver: bridge

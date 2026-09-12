@@ -1,0 +1,8 @@
+{
+  "name": "codemart",
+  "description": "A high-performance digital marketplace for themes, templates, scripts, wireframes, and creative design assets.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

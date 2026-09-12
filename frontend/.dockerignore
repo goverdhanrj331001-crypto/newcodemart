@@ -1,0 +1,14 @@
+# CodeMart Frontend — Next.js build context exclusions
+node_modules
+.next
+out
+build
+dist
+.git
+.gitignore
+*.log
+.vscode
+.idea
+.DS_Store
+README.md
+BACKEND_INTEGRATION.md
